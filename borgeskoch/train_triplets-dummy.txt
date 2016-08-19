@@ -1,0 +1,3 @@
+the sample set is too large to stay in the repository
+it can be downloaded here: http://labrosa.ee.columbia.edu/millionsong/sites/default/files/challenge/train_triplets.txt.zip
+
