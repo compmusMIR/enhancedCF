@@ -11,27 +11,38 @@
 struct rating_t {
     char *songname;
     char *username;
-    int count;
+    unsigned short count;
 };
 
+// user struct used in matrix
 struct matrixuser_t {
-    char *name;
+    int id;
     void *sroot;     // here goes the (song,count) subtree
+};
+
+// song struct used in matrix
+struct matrixsong_t {
+    int id;
+    unsigned short count; 
 };
 
 struct userratcount_t {
     char *name;
-    int count;     
+    int id;
+    unsigned short count;     
 };
 
-struct matrixsong_t {
+// song struct used in song tree
+struct songratcount_t {
     char *name;
-    int count; 
+    int id;
+    unsigned short count; 
 };
 
-
-int num_users_post, num_songs_post, num_ratings_post;
-
+// global counter
+int n_users;         // number of users
+int n_songs;        //number of songs
+int n_ratings;       // number of triples from input
 
 
 int compare_username(const void *p1, const void *p2)
@@ -51,16 +62,27 @@ int compare_matrixusername(const void *p1, const void *p2)
     mu1 = (const struct matrixuser_t *) p1;
     mu2 = (const struct matrixuser_t *) p2;
 
-    return strcmp(mu1->name, mu2->name);
+    return (mu1->id < mu2->id) ? -1 : (mu1->id > mu2->id);
 }
 
 
-int compare_songname(const void *p1, const void *p2)
+int compare_matrixsongname(const void *p1, const void *p2)
 {
     const struct matrixsong_t *ms1, *ms2;
 
     ms1 = (const struct matrixsong_t *) p1;
     ms2 = (const struct matrixsong_t *) p2;
+
+    return (ms1->id < ms2->id) ? -1 : (ms1->id > ms2->id);
+}
+
+
+int compare_songname(const void *p1, const void *p2)
+{
+    const struct songratcount_t *ms1, *ms2;
+
+    ms1 = (const struct songratcount_t *) p1;
+    ms2 = (const struct songratcount_t *) p2;
 
     return strcmp(ms1->name, ms2->name);
 }
@@ -104,7 +126,7 @@ void songwalkaction(const void *nodep, const VISIT which, const int depth)
 	case postorder:
         //msong = * (struct matrixsong_t **) nodep;
         //printf("song %s counted with %d ratings.\n", msong->name, msong->count);
-		num_songs_post++;
+		n_songs++;
         break;
     
 	case endorder:
@@ -113,7 +135,7 @@ void songwalkaction(const void *nodep, const VISIT which, const int depth)
 	case leaf:
         //msong = * (struct matrixsong_t **) nodep;
         //printf("song %s counted with %d ratings.\n", msong->name, msong->count);
-		num_songs_post++;
+		n_songs++;
         break;
     }
 }
@@ -125,14 +147,14 @@ void usersongwalkaction(const void *nodep, const VISIT which, const int depth)
     	break;
     
 	case postorder:
-		num_ratings_post++;
+		n_ratings++;
         break;
     
 	case endorder:
     	break;
     
 	case leaf:
-		num_ratings_post++;
+		n_ratings++;
         break;
     }
 }
@@ -146,7 +168,7 @@ void userwalkaction(const void *nodep, const VISIT which, const int depth)
     	break;
     
 	case postorder:
-		num_users_post++;
+		n_users++;
     	muser = * (struct matrixuser_t **) nodep;
 		twalk(muser->sroot, usersongwalkaction);
         break;
@@ -155,7 +177,7 @@ void userwalkaction(const void *nodep, const VISIT which, const int depth)
     	break;
     
 	case leaf:
-		num_users_post++;
+		n_users++;
     	muser = * (struct matrixuser_t **) nodep;
 		twalk(muser->sroot, usersongwalkaction);
         break;
@@ -164,48 +186,41 @@ void userwalkaction(const void *nodep, const VISIT which, const int depth)
 
 void userratwalkaction(const void *nodep, const VISIT which, const int depth)
 {
-    struct userratcount_t *user;
+    //struct userratcount_t *user;
 
     switch (which) {
    	case preorder:
     	break;
     
 	case postorder:
-		num_users_post++;
-    	user = * (struct userratcount_t **) nodep;
-        printf("user %s with %d ratings.\n", user->name, user->count);
+    	//user = * (struct userratcount_t **) nodep;
+        //printf("user %s with %d ratings.\n", user->name, user->count);
         break;
     
 	case endorder:
     	break;
     
 	case leaf:
-    	user = * (struct userratcount_t **) nodep;
-        printf("user %s with %d ratings.\n", user->name, user->count);
-		num_users_post++;
+    	//user = * (struct userratcount_t **) nodep;
+        //printf("user %s with %d ratings.\n", user->name, user->count);
         break;
     }
 }
 
 
-int getrating(void *matrixroot, char* username, char* songname)
+int getrating(void *matrixroot, int userid, int songid)
 {
     void *res;
     
     struct matrixuser_t *mu, *resmu;
     struct matrixsong_t *ms, *resms;
 
-    
-
-    printf("getrating entered.\n");
     // find user in matrix
     mu = malloc(sizeof(struct matrixuser_t));
-    mu->name = username;
+    mu->id = userid;
     mu->sroot = NULL;
-    printf("getrating: got mem for user.\n");
     res = tfind((void *) mu, &matrixroot, compare_matrixusername);
-    printf("getrating: returned from tfind user.\n");
-    
+    free(mu);
     if (res == NULL)
         return 0;
     
@@ -213,17 +228,45 @@ int getrating(void *matrixroot, char* username, char* songname)
  
     // user found; now search subtree of song ratings
     ms = malloc(sizeof(struct matrixsong_t));
-    ms->name = songname;
+    ms->id = songid;
     ms->count = 0;
     res = tfind((void *) ms, &(resmu->sroot), compare_songname);
-    printf("getrating: returned from tfind song.\n");
-    
+    free(ms);
+
     if (res == NULL)
         return 0;
 
     resms = * (struct matrixsong_t **) res;
 
     return resms->count;
+}
+
+int get_user_id(void *root, char *name){
+
+    void *res;
+    struct userratcount_t ur, *resur;
+    ur.name = name;
+    res = tfind((void *)&ur, &root, compare_username);
+    if (res == NULL)
+        return 0;
+
+    resur = * (struct userratcount_t **) res;
+
+    return resur->id;
+}
+
+int get_song_id(void *root, char *name){
+
+    void *res;
+    struct songratcount_t sr, *ressr;
+    sr.name = name;
+    res = tfind((void *)&sr, &root, compare_songname);
+    if (res == NULL)
+        return 0;
+
+    ressr = * (struct songratcount_t **) res;
+
+    return ressr->id;
 }
 
 int main(int argc, char *argv[])
@@ -240,68 +283,94 @@ int main(int argc, char *argv[])
 
     struct rating_t *rat;
     struct matrixuser_t *mu, *insmu;
-    struct matrixsong_t *ms, *insms;
+    struct matrixsong_t *ms;
 
     struct userratcount_t *ur, *insur;
+    struct songratcount_t *sr, *inssr;
 
-    int ratcount = 0;
+    int ratcount, usercount, songcount;
 
     if ((ifilestream = fopen(argv[1], "r")) == NULL)
         fprintf(stderr, "can't open %s", argv[1]);
 
-    while ((read = getline(&line, &len, ifilestream)) != -1) {
-       
+    // read the file line by line and build databases (trees)
+    while ((read = getline(&line, &len, ifilestream)) != -1) 
+    {
+        printf("reading rating. ");
         // split line in user, song and count
         rat = parse_input_line(line);
-
-        mu = malloc(sizeof(struct matrixuser_t));
-        mu->name = rat->username;
-        mu->sroot = NULL;
-        
-        ms = malloc(sizeof(struct matrixsong_t));
-        ms->name = rat->songname;
-        ms->count = rat->count;
-        
-        //add song + count to matrix (tree of trees)
-        //search/insert user
-        insmu = * (struct matrixuser_t **) tsearch((void *) mu, &matrixroot, compare_matrixusername);
-        // insert song at user
-        insms = * (struct matrixsong_t **) tsearch((void *) ms, &(insmu->sroot), compare_songname);
-        
-        //add usercount (num of ratings by user)
+        ratcount++;
+        printf("got rating. ");
+        //add usercount to USER TREE (num of ratings by user)
         ur = malloc(sizeof(struct userratcount_t));
         ur->name = rat->username;
+        ur->id = 0;
         ur->count = 0;
         insur = * (struct userratcount_t **) tsearch((void *) ur, &userroot, compare_username);
         insur->count += rat->count;
-        
-        //add songcount (num of ratings of song)
-        ms = malloc(sizeof(struct matrixsong_t));
-        ms->name = rat->songname;
-        ms->count = 0;
-        insms = * (struct matrixsong_t **) tsearch((void *) ms, &songroot, compare_songname);
-        insms->count += rat->count;
+        //adding id 
+        if (insur->id == 0){
+            insur->id = usercount + 1;
+            usercount++;
+        }
+        printf("user inserted. ");
 
-        ratcount++;
+        //add soncount to SONG TREE (num of ratings of song)
+        sr = malloc(sizeof(struct songratcount_t));
+        sr->name = rat->songname;
+        sr->id = 0;
+        sr->count = 0;
+        inssr = * (struct songratcount_t **) tsearch((void *) sr, &songroot, compare_songname);
+        inssr->count += rat->count;
+        if (inssr->id == 0){
+            inssr->id = songcount +1;
+            songcount++;
+        }
+        printf("song inserted. ");
+
+        //add song + count to USERSONG MATRIX (tree of trees) (num ratings for (user,song))
+        mu = malloc(sizeof(struct matrixuser_t));
+        mu->id = get_user_id(userroot, rat->username);
+        mu->sroot = NULL;
+        
+        ms = malloc(sizeof(struct matrixsong_t));
+        ms->id = get_song_id(songroot, rat->songname);
+        ms->count = rat->count;
+       
+        //search/insert user
+        insmu = * (struct matrixuser_t **) tsearch((void *) mu, &matrixroot, compare_matrixusername);
+        // insert song at user
+        (void) tsearch((void *) ms, &(insmu->sroot), compare_songname);
+        
+        printf("user/song rating inserted. ");
+        
+
+        free(rat);
+        printf("rating freeed. \n");
     }
     
+    //twalk(matrixroot, userwalkaction);
+    //twalk(songroot, songwalkaction);
+    //twalk(userroot, userratwalkaction);
 
-    twalk(matrixroot, userwalkaction);
-    twalk(songroot, songwalkaction);
-    twalk(userroot, userratwalkaction);
-
-    //printf("%d ratings included.\n", ratcount);
-    //printf("%d ratings/songs found for %d users.\n", num_ratings_post, num_users_post);
-    printf("%d different songs found.\n", num_songs_post);
+    printf("%d triplets entered / ratings registered.\n", ratcount);
+    printf("%d different songs and %d users found.\n\n", songcount, usercount);
     
-    int count = getrating(matrixroot, "b7815dbb206eb2831ce0fe040d0aa537e2e800f7", "SOZDENG12A8C13C632");
-    printf("rating is: %d\n",count);
-    
-    count = getrating(matrixroot, "b7815dbb206eb28315e0fe040d0aa537e2e800f7", "SODJQXO12A6D4F697D");
-    printf("rating is: %d\n",count);
-    
-    count = getrating(matrixroot, "b7815dbb206eb28315e0fe040d0aa537e2e800f7", "SODJQXO52A6D4F697D");
-    printf("rating is: %d\n",count);
+    //user not found
+    //int count = getrating(matrixroot, "8f993580642c7b58566a6dd69bcd8053dcd1c716", "SOZDENG12A8C13C632");
+    //printf("test1 (should be 0 ) rating is: %d\n",count);
+    //
+    //// user and song found
+    //count = getrating(matrixroot, "cf8289419383259189afe6bb50c5115fd84f1064", "SOZDENG12A8C13C632");
+    //printf("test2 (should be 1 ) rating is: %d\n",count);
+ 
+    //// user and song found
+    //count = getrating(matrixroot, "b7815dbb206eb2831ce0fe040d0aa537e2e800f7", "SOSQJWM12A6D4F79E0");
+    //printf("test3 (should be 6 ) rating is: %d\n",count);
+   
+    ////song not found
+    //count = getrating(matrixroot, "b7815dbb206eb2831ce0fe040d0aa537e2e800f7", "SODJQXO52X6D4F697D");
+    //printf("test3 (should be 0 ) rating is: %d\n",count);
     
     
     free(line);
