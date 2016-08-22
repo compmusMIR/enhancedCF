@@ -8,10 +8,14 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
-void *matrixroot = NULL;
-//void *userroot = NULL;
-void *maproot = NULL; 
+
+static void *matrixroot = NULL;
+static void *userroot = NULL;
+static void *maproot = NULL; 
+
+static int num_users, num_songs;
 
 struct rating_t {
     char *songname;
@@ -28,6 +32,11 @@ struct matrixsong_t {
 struct matrixuser_t {
 	int id; 
 	unsigned short rating;
+};
+
+struct userrating_t {
+	int id; 
+	int rating;
 };
 
 struct namemap_t {
@@ -74,6 +83,14 @@ int compare_matrixuserid(const void *p1, const void *p2)
     return (nm1->id < nm2->id) ? -1 : (nm1->id > nm2->id);
 }
 
+int compare_userid(const void *p1, const void *p2)
+{
+    const struct userrating_t *nm1, *nm2;
+    nm1 = (const struct userrating_t *) p1;
+    nm2 = (const struct userrating_t *) p2;
+    return (nm1->id < nm2->id) ? -1 : (nm1->id > nm2->id);
+}
+
 int getmapid(char* name)
 {
     static int idcount = 1;
@@ -89,27 +106,76 @@ int getmapid(char* name)
         resnm->id = idcount;
         idcount++;
     } else {
+        free(nm->name);
         free(nm);
     }
     return resnm->id;
 }
 
-void mapwalkaction(const void *nodep, const VISIT which, const int depth)
+void matrixuserwalkaction(const void *nodep, const VISIT which, const int depth)
 {
-    struct namemap_t *nm;
+    struct matrixuser_t *mu;
 
     switch (which) {
     case preorder:
         break;
     case postorder:
-        nm = * (struct namemap_t **) nodep;
-        printf("name: %s id: %d", nm->name, nm->id);
+        mu = * (struct matrixuser_t **) nodep;
+        printf("id: %d rating: %d", mu->id, mu->rating);
 		break;
     case endorder:
         break;
     case leaf:
-        nm = * (struct namemap_t **) nodep;
-        printf("name: %s id: %d", nm->name, nm->id);
+        mu = * (struct matrixuser_t **) nodep;
+        printf("id: %d rating: %d", mu->id, mu->rating);
+        break;
+    }
+}
+
+void matrixwalkaction(const void *nodep, const VISIT which, const int depth)
+{
+    //struct matrixsong_t *ms;
+
+    switch (which) {
+    case preorder:
+        break;
+    case postorder:
+        num_songs++;
+        //ms = * (struct matrixsong_t **) nodep;
+        //printf("songid: %d ratings: %d { ", ms->id, ms->rating);
+        //twalk(ms->uroot, matrixuserwalkaction);
+        //printf(" }\n");
+		break;
+    case endorder:
+        break;
+    case leaf:
+        num_songs++;
+        //ms = * (struct matrixsong_t **) nodep;
+        //printf("songid: %d ratings: %d { ", ms->id, ms->rating);
+        //twalk(ms->uroot, matrixuserwalkaction);
+        //printf(" }\n");
+        break;
+    }
+}
+
+void userwalkaction(const void *nodep, const VISIT which, const int depth)
+{
+    //struct userrating_t *ur;
+
+    switch (which) {
+    case preorder:
+        break;
+    case postorder:
+        num_users++;
+        //ur = * (struct  userrating_t **) nodep;
+        //printf("id: %d\tnumrat: %d\n", ur->id, ur->rating);
+		break;
+    case endorder:
+        break;
+    case leaf:
+        num_users++;
+        //ur = * (struct  userrating_t **) nodep;
+        //printf("id: %d\tnumrat: %d\n", ur->id, ur->rating);
         break;
     }
 }
@@ -124,7 +190,10 @@ void addsonguserrating(int songid, int userid, int rating)
 	ms->id = songid;
 	ms->rating = 0;
 	ms->uroot = NULL;
-    resms = * (struct matrixsong_t **) tsearch((void *) ms, &matrixroot, compare_matrixsongid);
+    
+    resms = * (struct matrixsong_t **) 
+        tsearch((void *) ms, &matrixroot, compare_matrixsongid);
+    
     if (resms->rating != 0){
         // entry already existed
         free(ms);
@@ -137,7 +206,9 @@ void addsonguserrating(int songid, int userid, int rating)
     mu->id = userid;
     mu->rating = 0;
 
-    resmu = * (struct matrixuser_t **) tsearch((void *) mu, &(resms->uroot), compare_matrixuserid);
+    resmu = * (struct matrixuser_t **) 
+        tsearch((void *) mu, &(resms->uroot), compare_matrixuserid);
+    
     if (resmu->rating != 0){
         // entry already existed
         free(mu);
@@ -147,43 +218,74 @@ void addsonguserrating(int songid, int userid, int rating)
     //printf("song %d - user %d- rating %d\n", songid, userid, rating);
 }
 
-int main(int argc, char *argv[])
+void adduserrating(int userid, unsigned short rating)
+{
+    struct userrating_t *ur, *resur;
+    ur = malloc(sizeof(struct userrating_t));
+	ur->id = userid;
+	ur->rating = 0;
+    
+    resur = * (struct userrating_t **) 
+        tsearch((void *) ur, &userroot, compare_userid);
+    
+    if (resur->rating != 0){
+        // entry already existed
+        free(ur);
+    }
+    // set/update rating
+    resur->rating += rating;
+}
+
+void free_mapnode(void *entry)
+{
+    struct namemap_t *nm = (struct namemap_t *) entry;
+    free(nm->name);
+    free(nm);
+}
+
+
+void fill_db (char *filename)
 {
     FILE *ifilestream;
     char *line = NULL;
     size_t len = 0;
     ssize_t read;
 
-    struct rating_t *rat;
-    int ratcount;
+    struct rating_t *rat = NULL;
 
-    if ((ifilestream = fopen(argv[1], "r")) == NULL)
-        fprintf(stderr, "can't open %s", argv[1]);
+    if ((ifilestream = fopen(filename, "r")) == NULL)
+        fprintf(stderr, "can't open %s", filename);
 
     // read the file line by line and build databases (trees)
     while ((read = getline(&line, &len, ifilestream)) != -1)
     {
         // split line in user, song and count
         rat = parse_input_line(line);
-        ratcount++;
-
         //insert username and songname in maptree, and get id
         int userid = getmapid(rat->username);
         int songid = getmapid(rat->songname);
-
-        //printf("user %d\tsong %d\n", userid, songid);
-
         //insert song-user-rating in matrix and update song rating count
         addsonguserrating(songid, userid, rat->count);      
         //insert user usertree and update user rating count
-	}
-  
-	if(maproot == NULL)
-		printf("no entries.\n"); 
-	
-	//twalk(maproot, mapwalkaction);
-	 
+        adduserrating(userid, rat->count);
+    
+        free(rat);
+    }
+    // map name -> id is no longer necessary
+    tdestroy(maproot, free_mapnode);
     free(line);
-    exit(EXIT_SUCCESS);
 }
 
+int get_num_users(void)
+{
+    num_users = 0;
+    twalk(userroot, userwalkaction);
+    return num_users;
+}
+
+int get_num_songs(void)
+{
+    num_songs = 0;
+    twalk(matrixroot, matrixwalkaction);
+    return num_songs;
+}
